@@ -245,3 +245,200 @@ function buildIndicators(bars, price) {
     volRatio:parseFloat(vr.toFixed(2)), vsa:vsa, ...pvt,
   };
 }
+export default function App() {
+  var [tdKey,setTdKey]=useState("");
+  var [aiKey,setAiKey]=useState("");
+  var [aiProvider,setAiProvider]=useState("gemini");
+  var [tdSaved,setTdSaved]=useState(false);
+  var [aiSaved,setAiSaved]=useState(false);
+  var [editTd,setEditTd]=useState(false);
+  var [editAi,setEditAi]=useState(false);
+  var [symbol,setSymbol]=useState("");
+  var [alreadyIn,setAlreadyIn]=useState("no");
+  var [myEntry,setMyEntry]=useState("");
+  var [loading,setLoading]=useState(false);
+  var [loadMsg,setLoadMsg]=useState("");
+  var [stockData,setStockData]=useState(null);
+  var [result,setResult]=useState(null);
+  var [error,setError]=useState("");
+  var [tab,setTab]=useState("analyze");
+  var [watchlist,setWatchlist]=useState([]);
+  var [history,setHistory]=useState([]);
+  var [cache,setCache]=useState({});
+  var [mkt,setMkt]=useState(getMarketStatus());
+  var [autoRef,setAutoRef]=useState(false);
+  var [refCount,setRefCount]=useState(60);
+  var [customRules,setCustomRules]=useState([]);
+  var [newRule,setNewRule]=useState({name:"",icon:"📌",description:"",bullish:"",bearish:""});
+  var [editRuleId,setEditRuleId]=useState(null);
+  var autoRefRef=useRef(autoRef);
+  autoRefRef.current=autoRef;
+
+  useEffect(function(){
+    (async function(){
+      try{
+        var k1=await dbGet("settings","tdKey"); if(k1&&k1.value){setTdKey(k1.value);setTdSaved(true);}
+        var k2=await dbGet("settings","aiKey"); if(k2&&k2.value){setAiKey(k2.value);setAiSaved(true);}
+        var k3=await dbGet("settings","aiProvider"); if(k3&&k3.value){setAiProvider(k3.value);}
+        var wl=await dbGetAll("watchlist"); setWatchlist(wl||[]);
+        var hi=await dbGetAll("analyses"); setHistory((hi||[]).reverse().slice(0,20));
+        var cr=await dbGetAll("customRules"); setCustomRules(cr||[]);
+        var pc=await dbGetAll("cache"); var m={};
+        (pc||[]).forEach(function(x){m[x.symbol]=x;}); setCache(m);
+      }catch(e){console.warn(e);}
+    })();
+    var t=setInterval(function(){setMkt(getMarketStatus());},30000);
+    return function(){clearInterval(t);};
+  },[]);
+
+  useEffect(function(){
+    if(!autoRef||!mkt.open||!symbol||loading) return;
+    setRefCount(60);
+    var id=setInterval(function(){
+      setRefCount(function(n){
+        if(n<=1){clearInterval(id);if(autoRefRef.current)doAnalyze(symbol);return 60;}
+        return n-1;
+      });
+    },1000);
+    return function(){clearInterval(id);};
+  },[autoRef,mkt.open,stockData]);
+
+  async function saveTdKey(){
+    if(!tdKey.trim())return;
+    await dbPut("settings",{key:"tdKey",value:tdKey.trim()});
+    setTdSaved(true);setEditTd(false);setError("");
+  }
+  async function saveAiKey(){
+    if(!aiKey.trim())return;
+    await dbPut("settings",{key:"aiKey",value:aiKey.trim()});
+    await dbPut("settings",{key:"aiProvider",value:aiProvider});
+    setAiSaved(true);setEditAi(false);setError("");
+  }
+
+  async function doAnalyze(sym){
+    var s=(sym||symbol).trim();
+    if(!s){setError("Stock symbol daalo");return;}
+    if(!tdKey){setError("Twelve Data API key save karo");return;}
+    if(!aiKey){setError("AI API key save karo");return;}
+    setError("");setStockData(null);setResult(null);setLoading(true);
+    try{
+      setLoadMsg("📡 Live price fetch ho raha hai...");
+      var quote=await fetchQuote(s,tdKey);
+      await dbPut("cache",Object.assign({symbol:s.toUpperCase(),cachedAt:Date.now()},quote));
+      setCache(function(prev){var n=Object.assign({},prev);n[s.toUpperCase()]=Object.assign({cachedAt:Date.now()},quote);return n;});
+      setLoadMsg("📊 200 din ka data le raha hai...");
+      var bars=await fetchHistory(s,tdKey);
+      setLoadMsg("🔢 Indicators calculate ho rahe hain...");
+      var ind=bars.length>0?buildIndicators(bars,quote.currentPrice):{};
+      var full=Object.assign({},quote,{indicators:ind});
+      setStockData(full);
+      var provName=(AI_PROVIDERS.find(function(x){return x.id===aiProvider;})||AI_PROVIDERS[0]).name;
+      setLoadMsg("🔱 "+provName+" se 28 rules apply ho rahe hain...");
+      var analysis=await runAnalysis(full,alreadyIn,myEntry,aiProvider,aiKey,customRules);
+      setResult(analysis);
+      await dbPut("analyses",{symbol:s.toUpperCase(),timestamp:Date.now(),date:new Date().toLocaleDateString("en-IN"),currentPrice:quote.currentPrice,overallBias:analysis.overallBias,confidence:analysis.confidence,targets:analysis.targets,stopLoss:analysis.stopLoss,summary:analysis.summary,indicators:ind});
+      var hi=await dbGetAll("analyses"); setHistory((hi||[]).reverse().slice(0,20));
+    }catch(e){setError(e.message||"Analysis fail hui. Dobara try karo.");}
+    setLoading(false);setLoadMsg("");
+  }
+
+  async function addWatch(){
+    if(!symbol.trim())return;
+    await dbPut("watchlist",{symbol:symbol.toUpperCase(),addedAt:Date.now()});
+    setWatchlist(await dbGetAll("watchlist")||[]);
+  }
+  async function removeWatch(sym){
+    await dbDelete("watchlist",sym);
+    setWatchlist(await dbGetAll("watchlist")||[]);
+  }
+
+  var bias=result?gb(result.overallBias):null;
+  var p=stockData?stockData.currentPrice:0;
+  var myNum=Number(myEntry)||0;
+  var inPro=myNum>0&&p>=myNum;
+  function tabSt(a){return{flex:1,padding:"9px",borderRadius:7,cursor:"pointer",fontFamily:"inherit",fontSize:10,fontWeight:"bold",letterSpacing:1,border:a?"1px solid #4a9eff":"1px solid #0a1c2c",background:a?"#4a9eff18":"#060e1a",color:a?"#4a9eff":"#234a66"};}
+  function keyBox(label,val,setVal,saved,setSaved,edit,setEdit,storeKey,saveFn){
+    return(<div style={{background:saved&&!edit?"#001e10":"#060e1a",border:"1px solid "+(saved&&!edit?"#00e67630":"#1a2e42"),borderRadius:9,padding:"11px 13px",marginBottom:10}}><div style={{fontSize:8,color:saved&&!edit?"#00e676":"#4a7a9a",letterSpacing:2,marginBottom:7}}>{"🔑 "+label+(saved&&!edit?" ✅ SAVED":"")}</div><div style={{display:"flex",gap:8}}><input type={saved&&!edit?"password":"text"} value={val} onChange={function(e){setVal(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")saveFn();}} placeholder={"Enter "+label+"..."} style={{flex:1,padding:"8px 10px",background:"#04090f",border:"1px solid "+(edit?"#ffd74040":"#0c1e2e"),borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:11}}/><button onClick={saveFn} className="hov" style={{padding:"8px 14px",background:saved&&!edit?"#001e10":"#0d2035",border:"1px solid "+(saved&&!edit?"#00e67640":"#4a9eff40"),borderRadius:6,color:saved&&!edit?"#00e676":"#4a9eff",fontFamily:"inherit",fontSize:10,fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap"}}>{saved&&!edit?"✅":"💾 SAVE"}</button>{saved&&(<button onClick={function(){setEdit(!edit);}} className="hov" style={{padding:"8px 11px",background:"#1a1000",border:"1px solid #ffd74035",borderRadius:6,color:"#ffd740",fontFamily:"inherit",fontSize:10,fontWeight:"bold",cursor:"pointer"}}>{edit?"❌":"✏️"}</button>)}</div></div>);
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#030810",fontFamily:"'Courier New',monospace",color:"#a0bcd0"}}>
+      <style>{`
+        @keyframes spin0{to{transform:rotate(360deg)}}
+        @keyframes spin1{to{transform:rotate(-360deg)}}
+        @keyframes spin2{to{transform:rotate(360deg)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+        @keyframes scan{0%{top:-1px}100%{top:101%}}
+        @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #00e67644}50%{box-shadow:0 0 0 8px #00e67600}}
+        .hov:hover{opacity:.8;cursor:pointer;transition:opacity .15s}
+        input:focus{outline:none!important;border-color:#4a9eff!important}
+        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+        ::-webkit-scrollbar{width:4px}
+        ::-webkit-scrollbar-thumb{background:#1a2e42;border-radius:2px}
+      `}</style>
+
+      <div style={{background:"linear-gradient(180deg,#060f18,#030810)",borderBottom:"1px solid #0a1c2c",padding:"14px 14px 10px",textAlign:"center",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:"linear-gradient(90deg,#00e676,#4a9eff 50%,#ff9800)"}}/>
+        <div style={{position:"absolute",left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,#4a9eff10,transparent)",animation:"scan 4s linear infinite",pointerEvents:"none"}}/>
+        <div style={{fontSize:8,letterSpacing:6,color:"#164060",marginBottom:3}}>NK STOCK TALK · AMRITWANI LIVE TRADE ADVISOR</div>
+        <h1 style={{margin:"0 0 5px",fontSize:22,fontWeight:900,letterSpacing:3,background:"linear-gradient(135deg,#00e676,#4a9eff 50%,#ff9800)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>LIVE TRADE ANALYZER</h1>
+        <div style={{display:"flex",justifyContent:"center",gap:7,flexWrap:"wrap"}}>
+          {[["TWELVE DATA LIVE","#00e676"],["20 NK AMRITWANI","#4a9eff"],["8 VOLUME SIGNALS","#ff9800"],["INDEXEDDB","#e040fb"]].map(function(x){return <span key={x[0]} style={{fontSize:8,color:x[1],background:x[1]+"12",padding:"2px 9px",borderRadius:10,border:"1px solid "+x[1]+"22",letterSpacing:1}}>{x[0]}</span>;})}
+        </div>
+      </div>
+
+      <div style={{maxWidth:980,margin:"0 auto",padding:"13px 12px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,padding:"9px 14px",background:"#060e1a",border:"1px solid "+mkt.color+"30",borderRadius:9}}>
+          <div style={{width:9,height:9,borderRadius:"50%",background:mkt.color,flexShrink:0,animation:mkt.open?"pulse 2s ease infinite":"none"}}/>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,fontWeight:"bold",color:mkt.color}}>{mkt.label}</div>
+            <div style={{fontSize:8,color:mkt.color+"77",marginTop:1}}>{mkt.open?"NSE · 9:15 AM - 3:30 PM IST · "+mkt.timeLeft:"Next: "+mkt.next}</div>
+          </div>
+          {!mkt.open&&<div style={{fontSize:8,color:"#4a9eff",padding:"4px 10px",background:"#4a9eff12",borderRadius:6,border:"1px solid #4a9eff25",textAlign:"center"}}><div style={{fontWeight:"bold"}}>Closed</div><div style={{color:"#1a4060",marginTop:1}}>Last price show hogi</div></div>}
+          {mkt.open&&stockData&&!loading&&(
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={function(){setAutoRef(!autoRef);}} className="hov" style={{padding:"5px 10px",background:autoRef?"#001e10":"#060e1a",border:"1px solid "+(autoRef?"#00e67640":"#1a2e42"),borderRadius:6,color:autoRef?"#00e676":"#1a4060",fontFamily:"inherit",fontSize:9,fontWeight:"bold",cursor:"pointer"}}>{autoRef?"🔄 "+refCount+"s":"⏸ AUTO"}</button>
+              <button onClick={function(){doAnalyze(symbol);}} className="hov" style={{padding:"5px 10px",background:"#001e10",border:"1px solid #00e67640",borderRadius:6,color:"#00e676",fontFamily:"inherit",fontSize:9,fontWeight:"bold",cursor:"pointer"}}>🔄 REFRESH</button>
+            </div>
+          )}
+        </div>
+
+        {keyBox("TWELVE DATA API KEY (twelvedata.com)",tdKey,setTdKey,tdSaved,setTdSaved,editTd,setEditTd,"tdKey",saveTdKey)}
+
+        <div style={{background:"#060e1a",border:"1px solid #4a9eff25",borderRadius:10,padding:14,marginBottom:10}}>
+          <div style={{fontSize:8,color:"#4a9eff",letterSpacing:3,marginBottom:12}}>🤖 AI PROVIDER CHOOSE KARO</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+            {AI_PROVIDERS.map(function(prov){
+              var active=aiProvider===prov.id;
+              return(<button key={prov.id} className="hov" onClick={function(){setAiProvider(prov.id);setAiSaved(false);setAiKey("");setEditAi(false);}} style={{padding:"10px 8px",borderRadius:8,cursor:"pointer",fontFamily:"inherit",border:active?"2px solid "+prov.color:"1px solid #0a1c2c",background:active?prov.color+"15":"#030810",transition:"all .2s"}}>
+                <div style={{fontSize:18,marginBottom:4}}>{prov.icon}</div>
+                <div style={{fontSize:9,fontWeight:"bold",color:active?prov.color:"#4a6a7a",marginBottom:2}}>{prov.name}</div>
+                <div style={{fontSize:8,color:active?prov.color+"88":"#1a4060"}}>{"✅ "+prov.free}</div>
+              </button>);
+            })}
+          </div>
+          {(function(){
+            var prov=AI_PROVIDERS.find(function(x){return x.id===aiProvider;})||AI_PROVIDERS[0];
+            return(<div>
+              <div style={{fontSize:8,color:"#1a4060",marginBottom:8,padding:"6px 9px",background:"#030810",borderRadius:6,border:"1px solid #0a1c2c"}}>{"🔗 "+prov.keyLink+" → Sign Up → Get API Key · "}<span style={{color:"#00e676"}}>{prov.free+" FREE"}</span></div>
+              <div style={{display:"flex",gap:8}}>
+                <input type={aiSaved&&!editAi?"password":"text"} value={aiKey} onChange={function(e){setAiKey(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")saveAiKey();}} placeholder={prov.keyPlaceholder} style={{flex:1,padding:"8px 10px",background:"#04090f",border:"1px solid "+(editAi?"#ffd74040":"#0c1e2e"),borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:11}}/>
+                <button onClick={saveAiKey} className="hov" style={{padding:"8px 14px",background:aiSaved&&!editAi?"#001e10":"#0d2035",border:"1px solid "+(aiSaved&&!editAi?"#00e67640":"#4a9eff40"),borderRadius:6,color:aiSaved&&!editAi?"#00e676":"#4a9eff",fontFamily:"inherit",fontSize:10,fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap"}}>{aiSaved&&!editAi?"✅ SAVED":"💾 SAVE"}</button>
+                {aiSaved&&(<button onClick={function(){setEditAi(!editAi);}} className="hov" style={{padding:"8px 11px",background:"#1a1000",border:"1px solid #ffd74035",borderRadius:6,color:"#ffd740",fontFamily:"inherit",fontSize:10,fontWeight:"bold",cursor:"pointer"}}>{editAi?"❌":"✏️"}</button>)}
+              </div>
+              {aiSaved&&!editAi&&(<div style={{marginTop:7,display:"flex",alignItems:"center",gap:7}}><div style={{width:7,height:7,background:prov.color,borderRadius:"50%"}}/><span style={{fontSize:9,color:prov.color}}>{prov.label+" · "+prov.free}</span></div>)}
+            </div>);
+          })()}
+        </div>
+
+        <div style={{fontSize:8,color:"#1a4060",marginBottom:12,padding:"7px 10px",background:"#060e1a",borderRadius:7,border:"1px solid #0a1c2c"}}>
+          💡 <span style={{color:"#4a9eff"}}>Twelve Data</span>: twelvedata.com (800 calls/day) · Switch AI kabhi bhi — sab free! 🎉
+        </div>
+
+        <div style={{display:"flex",gap:6,marginBottom:12}}>
+          <button className="hov" onClick={function(){setTab("analyze");}} style={tabSt(tab==="analyze")}>🔍 ANALYZE</button>
+          <button className="hov" onClick={function(){setTab("watchlist");}} style={tabSt(tab==="watchlist")}>⭐ WATCHLIST</button>
+          <button className="hov" onClick={function(){setTab("history");}} style={tabSt(tab==="history")}>📋 HISTORY</button>
+          <button className="hov" onClick={function(){setTab("rules");}} style={tabSt(tab==="rules")}>➕ RULES</button>
+        </div>
