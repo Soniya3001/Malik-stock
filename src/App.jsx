@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from "react";
 
 function openDB() {
@@ -245,6 +244,166 @@ function buildIndicators(bars, price) {
     volRatio:parseFloat(vr.toFixed(2)), vsa:vsa, ...pvt,
   };
 }
+function repairJSON(s) {
+  s = s.replace(/,\s*([}\]])/g,"$1");
+  var br=0,bk=0,inStr=false,esc=false;
+  for (var i=0;i<s.length;i++) {
+    var c=s[i];
+    if(esc){esc=false;continue;}
+    if(c==="\\"&&inStr){esc=true;continue;}
+    if(c==='"'){inStr=!inStr;continue;}
+    if(inStr)continue;
+    if(c==="{")br++; else if(c==="}")br--;
+    else if(c==="[")bk++; else if(c==="]")bk--;
+  }
+  if(inStr)s+='"';
+  while(bk>0){s+="]";bk--;}
+  while(br>0){s+="}";br--;}
+  return s.replace(/,\s*([}\]])/g,"$1");
+}
+function parseJSON(text) {
+  var clean=text.replace(/```json|```/g,"").trim();
+  var s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+  if(s===-1) throw new Error("No JSON returned");
+  var str=clean.slice(s,e+1);
+  try{return JSON.parse(str);}
+  catch(ex){return JSON.parse(repairJSON(str));}
+}
+
+async function runAnalysis(stock, alreadyIn, entryPrice, aiProvider, aiKey, customRules) {
+  var p=stock.currentPrice; var ind=stock.indicators||{};
+  var t1=Math.round(p*1.04),t2=Math.round(p*1.08),t3=Math.round(p*1.14);
+  var sl=Math.round(p*0.97),atrSL=Math.round(p*0.965);
+  var ef=Math.round(p*0.99),et=Math.round(p*1.003);
+  var tsl=Math.round(p*0.985),exsl=Math.round(p*0.965);
+  var s5=String(ind.sma5||"?"),s9=String(ind.sma9||"?");
+  var s20=String(ind.sma20||"?"),e200=String(ind.ema200||"?");
+  var vw=String(ind.vwap||"?"),bbU=String(ind.bbUpper||"?"),bbL=String(ind.bbLower||"?");
+  var rsiS=ind.rsi?String(ind.rsi):"?",mfiS=ind.mfi?String(ind.mfi):"?";
+  var vrS=String(ind.volRatio||"1");
+  var R1=String(ind.R1||Math.round(p*1.025)),R2=String(ind.R2||Math.round(p*1.05));
+  var S1=String(ind.S1||Math.round(p*0.975)),S2=String(ind.S2||Math.round(p*0.955));
+  var trivSig=(ind.sma9&&ind.vwap&&ind.sma20&&p>ind.sma9&&p>ind.vwap&&p>ind.sma20)?"BULLISH":(p<ind.sma9&&p<ind.vwap&&p<ind.sma20)?"BEARISH":"NEUTRAL";
+  var bbSig=p>(ind.bbUpper||p*1.03)*0.99?"BEARISH":p<(ind.bbLower||p*0.97)*1.01?"BULLISH":"NEUTRAL";
+  var vwapSig=p>ind.vwap?"BULLISH":"BEARISH";
+  var smaSig=(ind.sma5&&p>ind.sma5*1.01)?"BULLISH":(ind.sma5&&p<ind.sma5*0.99)?"BEARISH":"NEUTRAL";
+  var emaSig=(ind.ema200&&p>ind.ema200)?"BULLISH":"BEARISH";
+  var rsiNum=parseFloat(rsiS)||50,rsiSig=rsiNum>70?"BEARISH":rsiNum<30?"BULLISH":"NEUTRAL";
+  var obvSig=ind.obvTrend==="RISING"?"BULLISH":ind.obvTrend==="FALLING"?"BEARISH":"NEUTRAL";
+  var adSig=ind.adTrend==="RISING"?"BULLISH":ind.adTrend==="FALLING"?"BEARISH":"NEUTRAL";
+  var mfiNum=parseFloat(mfiS)||50,mfiSig=mfiNum>80?"BEARISH":mfiNum<20?"BULLISH":"NEUTRAL";
+  var vrNum=parseFloat(vrS)||1;
+  var vrSig=vrNum>=1.5&&stock.dayChangePercent>=0?"BULLISH":"NEUTRAL";
+  var vsaP=ind.vsa||"NORMAL";
+  var vsaSig=vsaP==="NO_SUPPLY"||vsaP==="STOPPING"||vsaP==="DRY_UP"?"BULLISH":vsaP==="NO_DEMAND"||vsaP==="CLIMAX"?"BEARISH":"NEUTRAL";
+  var vsaDesc=vsaP==="NO_DEMAND"?"Narrow up bar + low vol = No Demand. Fall likely.":vsaP==="NO_SUPPLY"?"Narrow down bar + low vol = No Supply. Rise likely.":vsaP==="STOPPING"?"High vol down bar closes near high = Sellers absorbed. Reversal.":vsaP==="CLIMAX"?"Volume 3x avg = Exhaustion. Watch for reversal.":vsaP==="DRY_UP"?"Very low volume = Spring. Big move imminent.":"Normal volume spread.";
+  var gapSig=stock.dayChangePercent>1?"BULLISH":stock.dayChangePercent<-1?"BEARISH":"NEUTRAL";
+  var tradeNote=alreadyIn==="yes"?"Trader already in at Rs."+entryPrice+". Give trailing SL and exit-to-save-loss.":"Fresh entry. Give entry zone with condition.";
+  var lines=[
+    "NK Amritwani trade advisor. Give EXACT prices like a mentor.",
+    "STOCK: "+(stock.symbolInput||stock.symbol)+" | EXCHANGE: "+stock.exchange,
+    "PRICE: Rs."+p+" | PREV: Rs."+stock.previousClose+" | CHG: "+stock.dayChangePercent.toFixed(2)+"%",
+    "H/L: Rs."+stock.dayHigh+" / Rs."+stock.dayLow,"52W: Rs."+stock.weekHigh52+" / Rs."+stock.weekLow52,
+    "VOL: "+stock.volume.toLocaleString()+" | VOL RATIO: "+vrS+"x",
+    "5SMA:"+s5+" 9SMA:"+s9+" 20SMA:"+s20+" 200EMA:"+e200,
+    "VWAP:"+vw+" BBU:"+bbU+" BBL:"+bbL,
+    "RSI:"+rsiS+" MFI:"+mfiS+" OBV:"+ind.obvTrend+" AD:"+ind.adTrend+" VSA:"+vsaP,
+    "Pivot R1:"+R1+" R2:"+R2+" S1:"+S1+" S2:"+S2,tradeNote,
+    "Return ONLY this JSON structure with all values filled:",
+    '{"overallBias":"BULLISH","biasStrength":"STRONG","trend":"UPTREND","confidence":78,',
+    '"rulesTriggered":["Triveni Sangam Active","Price above VWAP","OBV Rising"],',
+    '"freshEntry":{"action":"BUY","entryZone":{"from":'+String(ef)+',"to":'+String(et)+'},"entryCondition":"Close above VWAP Rs.'+vw+' on 15-min","entryReason":"Triveni Sangam active.","riskRewardRatio":"1:3"},',
+    '"targets":[{"level":1,"price":'+String(t1)+',"label":"T1 - Book Partial","basis":"Pivot R1 Rs.'+R1+'","action":"Exit 40%. Trail SL to entry."},',
+    '{"level":2,"price":'+String(t2)+',"label":"T2 - Major Target","basis":"Pivot R2 Rs.'+R2+'","action":"Exit 40%. Move SL to T1."},',
+    '{"level":3,"price":'+String(t3)+',"label":"T3 - Full Target","basis":"Trend extension","action":"Exit remaining 20%."}],',
+    '"stopLoss":{"price":'+String(sl)+',"basis":"Close below 20SMA Rs.'+s20+' on 15-min","rule13":"SL just below entry on sustainable basis","atrSL":'+String(atrSL)+',"atrBasis":"1.5x ATR"},',
+    '"alreadyIn":{"status":"IN PROFIT","holdOrExit":"HOLD","advice":"Hold with trailing SL.",',
+    '"trailingSL":{"price":'+String(tsl)+',"basis":"Trail to 9SMA Rs.'+s9+'","action":"Raise SL on every new high"},',
+    '"exitToSaveLoss":{"price":'+String(exsl)+',"urgency":"HIGH","basis":"Close below 20SMA = exit immediately"},',
+    '"profitProtection":{"action":"Move SL to breakeven Rs.'+String(p)+' after T1 hit"}},',
+    '"keyLevels":{"S1":'+S1+',"S2":'+S2+',"R1":'+R1+',"R2":'+R2+'},',
+    '"signals":[',
+    '{"rule":"1. Triveni Sangam","icon":"🔱","signal":"'+trivSig+'","conf":'+(trivSig!=="NEUTRAL"?88:50)+',"detail":"9SMA Rs.'+s9+' VWAP Rs.'+vw+' 20SMA Rs.'+s20+'. Price Rs.'+p+' '+(trivSig==="BULLISH"?"above all three. Bullish surge.":trivSig==="BEARISH"?"below all three. Sharp fall risk.":"between indicators. Wait.")+'"},',
+    '{"rule":"2. BB Blast/Fall","icon":"💥","signal":"'+bbSig+'","conf":70,"detail":"BB Upper Rs.'+bbU+' Lower Rs.'+bbL+'. '+(bbSig==="BEARISH"?"Near upper. Fall to 20SMA likely.":bbSig==="BULLISH"?"Near lower. Bounce possible.":"Ride 5SMA on blast.")+'"},',
+    '{"rule":"3. ORB 30-min","icon":"⏱️","signal":"NEUTRAL","conf":60,"detail":"Check if first 30-min candle high/low broken. Strong trend day."},',
+    '{"rule":"4. VWAP Position","icon":"📐","signal":"'+vwapSig+'","conf":78,"detail":"Price Rs.'+p+' '+(vwapSig==="BULLISH"?"ABOVE VWAP Rs."+vw+". Institutional buying bias.":"BELOW VWAP Rs."+vw+". Selling pressure.")+'"},',
+    '{"rule":"5. 5SMA Trend","icon":"📈","signal":"'+smaSig+'","conf":80,"detail":"Price Rs.'+p+' vs 5SMA Rs.'+s5+'. '+(smaSig==="BULLISH"?"Strongly trending.":smaSig==="BEARISH"?"Below 5SMA = bearish.":"Near 5SMA.")+'"},',
+    '{"rule":"6. 200 EMA","icon":"🌊","signal":"'+emaSig+'","conf":88,"detail":"Price Rs.'+p+' '+(emaSig==="BULLISH"?"ABOVE 200EMA Rs."+e200+". Major uptrend.":"BELOW 200EMA Rs."+e200+". Downtrend. Caution.")+'"},',
+    '{"rule":"7. RSI","icon":"⚡","signal":"'+rsiSig+'","conf":72,"detail":"RSI(14)='+rsiS+'. '+(rsiNum>70?"OVERBOUGHT.":rsiNum<30?"OVERSOLD.":"Healthy zone.")+'"},',
+    '{"rule":"8. CPR+VWAP 45°","icon":"📊","signal":"NEUTRAL","conf":60,"detail":"If Open=Low above CPR and VWAP at 45° = full trend day."},',
+    '{"rule":"9. Doji Reversal","icon":"🕯️","signal":"NEUTRAL","conf":55,"detail":"Check 1H/Daily for doji with large wicks at low = reversal."},',
+    '{"rule":"10. Gap Breakout","icon":"🚀","signal":"'+gapSig+'","conf":'+(Math.abs(stock.dayChangePercent)>1?72:50)+',"detail":"Day change '+stock.dayChangePercent.toFixed(2)+'%. '+(Math.abs(stock.dayChangePercent)>1?"Gap detected. Enter near pivot.":"No gap. Normal open.")+'"},',
+    '{"rule":"11. Entry vs SL","icon":"🎯","signal":"BULLISH","conf":85,"detail":"Entry Rs.'+String(ef)+'-'+String(et)+'. SL Rs.'+String(sl)+' on closing basis."},',
+    '{"rule":"12. Expiry CE/PE","icon":"⚖️","signal":"NEUTRAL","conf":55,"detail":"On expiry: ATM CE+PE both extreme = rangebound."},',
+    '{"rule":"13. OTM Double","icon":"💹","signal":"NEUTRAL","conf":50,"detail":"OTM doubles intraday = targets 4x by close. VIX low."},',
+    '{"rule":"14. Time Track","icon":"🕐","signal":"NEUTRAL","conf":55,"detail":"4-weekly: sell last week. Mon/Tue = next week expiry."},',
+    '{"rule":"15. AVWAP Selling","icon":"🔄","signal":"NEUTRAL","conf":55,"detail":"Sell at AVWAP return. SL = close above AVWAP."},',
+    '{"rule":"V1. OBV","icon":"📡","signal":"'+obvSig+'","conf":'+(obvSig!=="NEUTRAL"?78:50)+',"detail":"OBV '+ind.obvTrend+'. '+(ind.obvTrend==="RISING"?"Accumulation.":ind.obvTrend==="FALLING"?"Distribution.":"Neutral.")+'"},',
+    '{"rule":"V2. MFI","icon":"💰","signal":"'+mfiSig+'","conf":'+(mfiSig!=="NEUTRAL"?75:55)+',"detail":"MFI='+mfiS+'. '+(mfiNum>80?"Overbought.":mfiNum<20?"Oversold.":"Normal.")+'"},',
+    '{"rule":"V3. AD Line","icon":"📉","signal":"'+adSig+'","conf":'+(adSig!=="NEUTRAL"?72:50)+',"detail":"AD '+ind.adTrend+'. '+(ind.adTrend==="RISING"?"Money IN.":"Money OUT.")+'"},',
+    '{"rule":"V4. Volume","icon":"📦","signal":"'+vrSig+'","conf":65,"detail":"'+vrS+'x avg. '+(vrNum>=3?"CLIMAX.":vrNum>=1.5?"HIGH vol.":vrNum<0.4?"DRY UP.":"Normal.")+'"},',
+    '{"rule":"V5. VSA","icon":"🔬","signal":"'+vsaSig+'","conf":68,"detail":"'+vsaDesc+'"},',
+    '{"rule":"V6. Vol S/R","icon":"🔒","signal":"'+(vrNum>=1.5?"BULLISH":"NEUTRAL")+'","conf":'+(vrNum>=1.5?70:50)+',"detail":"'+(vrNum>=1.5?"High vol at key level = confirmation.":"Normal vol. Monitor S1 Rs."+S1+".")+'"},',
+    '{"rule":"V7. Inst.Footprint","icon":"🏦","signal":"'+(vrNum>=2?"BULLISH":"NEUTRAL")+'","conf":'+(vrNum>=2?72:50)+',"detail":"'+(vrNum>=2?"Vol "+vrS+"x = institutional accumulation.":"No unusual activity.")+'"},',
+    '{"rule":"V8. Delivery%","icon":"🚚","signal":"NEUTRAL","conf":60,"detail":"Check NSE bhavcopy. Above 50% = genuine buying."}',
+    '],"warnings":[],"summary":"Write 3-4 direct sentences with exact prices. Tell trader what to do NOW."}',
+  ];
+  if (customRules && customRules.length > 0) {
+    var crLines=["","CUSTOM RULES (apply these too):"];
+    customRules.forEach(function(cr,i){ crLines.push("CR"+(i+1)+". "+cr.name+": "+cr.description+" | Bull: "+cr.bullish+" | Bear: "+cr.bearish); });
+    lines.splice(lines.length-1, 0, crLines.join("\n"));
+  }
+  var prompt=lines.join("\n");
+  var text=await callAI(aiProvider, aiKey, prompt);
+  if(!text) throw new Error("AI ne koi response nahi diya.");
+  return parseJSON(text);
+}
+
+var AI_PROVIDERS=[
+  {id:"gemini",name:"Gemini Flash 2.5",label:"Google Gemini Flash 2.5",icon:"🟢",free:"1500 calls/day",keyLink:"aistudio.google.com",keyPlaceholder:"AIza...",color:"#4285f4"},
+  {id:"groq",name:"Groq (Llama 3.3 70B)",label:"Groq — Llama 3.3 70B",icon:"⚡",free:"~100 calls/day",keyLink:"console.groq.com",keyPlaceholder:"gsk_...",color:"#f55036"},
+  {id:"openrouter",name:"OpenRouter (Free)",label:"OpenRouter — Free Models",icon:"🔀",free:"~50 calls/day",keyLink:"openrouter.ai",keyPlaceholder:"sk-or-...",color:"#7c3aed"},
+];
+
+async function callAI(provider, apiKey, prompt) {
+  var res, data, text;
+  if (provider==="gemini") {
+    res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key="+apiKey,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.2,maxOutputTokens:3000}})});
+    data=await res.json();
+    if(data.error) throw new Error("Gemini: "+data.error.message);
+    text=data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts?data.candidates[0].content.parts.map(function(p){return p.text||"";}).join(""):"";
+    return text;
+  }
+  if (provider==="groq") {
+    res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+apiKey},body:JSON.stringify({model:"llama-3.3-70b-versatile",messages:[{role:"user",content:prompt}],temperature:0.2,max_tokens:3000})});
+    data=await res.json();
+    if(data.error) throw new Error("Groq: "+(data.error.message||JSON.stringify(data.error)));
+    return data.choices&&data.choices[0]&&data.choices[0].message?data.choices[0].message.content:"";
+  }
+  if (provider==="openrouter") {
+    res=await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+apiKey,"HTTP-Referer":"https://nk-scanner.app","X-Title":"NK Amritwani Scanner"},body:JSON.stringify({model:"meta-llama/llama-3.3-70b-instruct:free",messages:[{role:"user",content:prompt}],temperature:0.2,max_tokens:3000})});
+    data=await res.json();
+    if(data.error) throw new Error("OpenRouter: "+(data.error.message||JSON.stringify(data.error)));
+    return data.choices&&data.choices[0]&&data.choices[0].message?data.choices[0].message.content:"";
+  }
+  throw new Error("Unknown provider: "+provider);
+}
+
+var BIAS={BULLISH:{c:"#00e676",bg:"#00e67614",bd:"#00e67635",e:"🟢"},BEARISH:{c:"#ff1744",bg:"#ff174414",bd:"#ff174435",e:"🔴"},NEUTRAL:{c:"#ffd740",bg:"#ffd74014",bd:"#ffd74035",e:"🟡"},AVOID:{c:"#ff6d00",bg:"#ff6d0014",bd:"#ff6d0035",e:"⛔"}};
+var SIGC={BULLISH:{c:"#00e676",e:"🟢"},BEARISH:{c:"#ff1744",e:"🔴"},NEUTRAL:{c:"#ffd740",e:"🟡"}};
+var gb=function(s){return BIAS[s]||BIAS.NEUTRAL;};
+var gs=function(s){return SIGC[s]||SIGC.NEUTRAL;};
+
+function Bar({v,color}){
+  return(<div style={{display:"flex",alignItems:"center",gap:6}}><div style={{flex:1,height:4,background:"#0a1525",borderRadius:2}}><div style={{width:Math.min(v||0,100)+"%",height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div><span style={{fontSize:10,color:color,minWidth:32,textAlign:"right"}}>{v}%</span></div>);
+}
+function Spinner(){
+  return(<div style={{position:"relative",width:52,height:52}}>{["#00e676","#4a9eff","#ff9800"].map(function(c,i){return <div key={i} style={{position:"absolute",inset:(i*7)+"px",border:"2px solid transparent",borderTopColor:c,borderRadius:"50%",animation:"spin"+i+" "+(0.65+i*0.25)+"s linear infinite"}}/>;})}</div>);
+}
+function IndBox({label,value,above,raw}){
+  var c=above?"#00e676":"#ff5252";
+  return(<div style={{background:above?"#00e67608":"#ff174408",border:"1px solid "+(above?"#00e67620":"#ff174420"),borderRadius:7,padding:"7px 9px"}}><div style={{fontSize:8,color:"#1a4060",letterSpacing:1,marginBottom:2}}>{label}</div><div style={{fontSize:11,fontWeight:"bold",color:c}}>{raw?String(value):(value!=null?"₹"+Number(value).toLocaleString("en-IN"):"—")}</div><div style={{fontSize:8,color:c+"88",marginTop:1}}>{above?"▲ ABOVE":"▼ BELOW"}</div></div>);
+}
 export default function App() {
   var [tdKey,setTdKey]=useState("");
   var [aiKey,setAiKey]=useState("");
@@ -442,7 +601,7 @@ export default function App() {
           <button className="hov" onClick={function(){setTab("history");}} style={tabSt(tab==="history")}>📋 HISTORY</button>
           <button className="hov" onClick={function(){setTab("rules");}} style={tabSt(tab==="rules")}>➕ RULES</button>
         </div>
-{tab==="analyze"&&(
+        {tab==="analyze"&&(
           <div>
             <div style={{background:"#060e1a",border:"1px solid #0a1c2c",borderRadius:10,padding:14,marginBottom:12}}>
               <div style={{display:"flex",gap:8,marginBottom:10}}>
@@ -644,7 +803,7 @@ export default function App() {
             )}
           </div>
         )}
-{tab==="watchlist"&&(
+        {tab==="watchlist"&&(
           <div>
             <div style={{fontSize:8,color:"#ff9800",letterSpacing:3,marginBottom:10}}>⭐ WATCHLIST — TAP KARKE ANALYZE KAR</div>
             {watchlist.length===0?(
