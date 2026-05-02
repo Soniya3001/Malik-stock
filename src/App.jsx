@@ -644,3 +644,156 @@ export default function App() {
             )}
           </div>
         )}
+{tab==="watchlist"&&(
+          <div>
+            <div style={{fontSize:8,color:"#ff9800",letterSpacing:3,marginBottom:10}}>⭐ WATCHLIST — TAP KARKE ANALYZE KAR</div>
+            {watchlist.length===0?(
+              <div style={{textAlign:"center",padding:"50px 0",color:"#1a4060",fontSize:12}}>Koi stock nahi hai.<br/>Koi symbol search karo aur ⭐ dabao.</div>
+            ):(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(185px,1fr))",gap:9}}>
+                {watchlist.map(function(item){
+                  var c=cache[item.symbol]; var up=c&&c.dayChange>=0;
+                  return(
+                    <div key={item.symbol} onClick={function(){setTab("analyze");setSymbol(item.symbol);doAnalyze(item.symbol);}} onMouseEnter={function(e){e.currentTarget.style.borderColor="#4a9eff44";}} onMouseLeave={function(e){e.currentTarget.style.borderColor="#0a1c2c";}} style={{background:"#060e1a",border:"1px solid #0a1c2c",borderRadius:10,padding:13,cursor:"pointer",transition:"border-color .2s"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                        <div>
+                          <div style={{fontSize:15,fontWeight:900,color:"#4a9eff"}}>{item.symbol}</div>
+                          {c?(<div><div style={{fontSize:14,fontWeight:"bold",color:"#d0e8e0",marginTop:2}}>{"₹"+c.currentPrice.toLocaleString("en-IN")}</div><div style={{fontSize:10,color:up?"#00e676":"#ff1744"}}>{(up?"▲":"▼")+" "+Math.abs(c.dayChangePercent||0).toFixed(2)+"%"}</div></div>):<div style={{fontSize:9,color:"#1a4060",marginTop:4}}>Tap to load</div>}
+                        </div>
+                        <button className="hov" onClick={function(e){e.stopPropagation();removeWatch(item.symbol);}} style={{background:"none",border:"none",color:"#ff174466",fontSize:18,cursor:"pointer",padding:"0 4px"}}>✕</button>
+                      </div>
+                      <div style={{fontSize:8,color:"#4a9eff",letterSpacing:1}}>TAP TO ANALYZE →</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab==="history"&&(
+          <div>
+            <div style={{fontSize:8,color:"#4a9eff",letterSpacing:3,marginBottom:10}}>📋 ANALYSIS HISTORY — INDEXEDDB</div>
+            {history.length===0?(
+              <div style={{textAlign:"center",padding:"50px 0",color:"#1a4060",fontSize:12}}>Koi analysis nahi hui abhi.</div>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {history.map(function(h,i){
+                  var bc=gb(h.overallBias);
+                  return(
+                    <div key={i} onClick={function(){setTab("analyze");setSymbol(h.symbol);}} style={{background:"#060e1a",border:"1px solid "+bc.bd,borderRadius:10,padding:13,cursor:"pointer"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                            <span style={{fontSize:14,fontWeight:900,color:bc.c}}>{h.symbol}</span>
+                            <span style={{fontSize:9,background:bc.bg,color:bc.c,padding:"2px 9px",borderRadius:10,border:"1px solid "+bc.bd}}>{bc.e+" "+h.overallBias}</span>
+                          </div>
+                          <div style={{fontSize:9,color:"#2a5a7a",marginBottom:4}}>{h.date+" · ₹"+Number(h.currentPrice).toLocaleString("en-IN")+" · "+h.confidence+"% conf"}</div>
+                          {h.summary&&<div style={{fontSize:9,color:"#1a4060",lineHeight:1.5}}>{h.summary.slice(0,110)+"..."}</div>}
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          {h.targets&&h.targets[0]&&<div style={{fontSize:11,color:"#00e676",fontWeight:"bold"}}>{"T1: ₹"+Number(h.targets[0].price).toLocaleString("en-IN")}</div>}
+                          {h.stopLoss&&<div style={{fontSize:11,color:"#ff1744",fontWeight:"bold"}}>{"SL: ₹"+Number(h.stopLoss.price).toLocaleString("en-IN")}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab==="rules"&&(
+          <div>
+            <div style={{fontSize:8,color:"#e040fb",letterSpacing:3,marginBottom:10}}>➕ CUSTOM TECHNICAL RULES — APNE RULES ADD KARO</div>
+            <div style={{fontSize:9,color:"#1a4060",marginBottom:12,padding:"8px 11px",background:"#060e1a",borderRadius:7,border:"1px solid #0a1c2c",lineHeight:1.7}}>
+              Yahan apne khud ke technical rules add karo. Ye rules automatically analysis mein include honge.
+            </div>
+            <div id="custom-rule-form" style={{background:"#060e1a",border:"1px solid #e040fb30",borderRadius:10,padding:14,marginBottom:14}}>
+              <div style={{fontSize:8,color:"#e040fb",letterSpacing:3,marginBottom:12}}>{editRuleId?"✏️ RULE EDIT KARO":"➕ NAYA RULE ADD KARO"}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:8,color:"#1a4060",marginBottom:4}}>RULE NAME *</div>
+                  <input value={newRule.name} onChange={function(e){setNewRule(function(r){return Object.assign({},r,{name:e.target.value});});}} placeholder="e.g. MACD Crossover, Supertrend..." style={{width:"100%",padding:"8px 10px",background:"#04090f",border:"1px solid #0c1e2e",borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:11,boxSizing:"border-box"}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:8,color:"#1a4060",marginBottom:4}}>ICON (emoji)</div>
+                  <input value={newRule.icon} onChange={function(e){setNewRule(function(r){return Object.assign({},r,{icon:e.target.value});});}} placeholder="📌 🔥 ⭐ 💎 🎯" style={{width:"100%",padding:"8px 10px",background:"#04090f",border:"1px solid #0c1e2e",borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:16,boxSizing:"border-box"}}/>
+                </div>
+              </div>
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:8,color:"#1a4060",marginBottom:4}}>RULE DESCRIPTION *</div>
+                <textarea value={newRule.description} onChange={function(e){setNewRule(function(r){return Object.assign({},r,{description:e.target.value});});}} placeholder="e.g. MACD line crosses above signal line on daily chart..." rows={2} style={{width:"100%",padding:"8px 10px",background:"#04090f",border:"1px solid #0c1e2e",borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:11,boxSizing:"border-box",resize:"vertical"}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:8,color:"#00e676",marginBottom:4}}>🟢 BULLISH CONDITION</div>
+                  <textarea value={newRule.bullish} onChange={function(e){setNewRule(function(r){return Object.assign({},r,{bullish:e.target.value});});}} placeholder="e.g. MACD above signal + histogram positive" rows={2} style={{width:"100%",padding:"8px 10px",background:"#04090f",border:"1px solid #00e67620",borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:11,boxSizing:"border-box",resize:"vertical"}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:8,color:"#ff1744",marginBottom:4}}>🔴 BEARISH CONDITION</div>
+                  <textarea value={newRule.bearish} onChange={function(e){setNewRule(function(r){return Object.assign({},r,{bearish:e.target.value});});}} placeholder="e.g. MACD below signal + histogram negative" rows={2} style={{width:"100%",padding:"8px 10px",background:"#04090f",border:"1px solid #ff174420",borderRadius:6,color:"#b0c8d8",fontFamily:"inherit",fontSize:11,boxSizing:"border-box",resize:"vertical"}}/>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button className="hov" onClick={async function(){
+                  if(!newRule.name.trim()||!newRule.description.trim()){alert("Rule name aur description zaroori hai!");return;}
+                  if(editRuleId){await dbPut("customRules",Object.assign({},newRule,{id:editRuleId}));}
+                  else{await dbPut("customRules",Object.assign({},newRule,{createdAt:Date.now()}));}
+                  var cr=await dbGetAll("customRules"); setCustomRules(cr||[]);
+                  setNewRule({name:"",icon:"📌",description:"",bullish:"",bearish:""});
+                  setEditRuleId(null);
+                }} style={{flex:1,padding:"9px",background:editRuleId?"#1a1000":"#001e10",border:"1px solid "+(editRuleId?"#ffd74040":"#00e67640"),borderRadius:7,color:editRuleId?"#ffd740":"#00e676",fontFamily:"inherit",fontSize:10,fontWeight:"bold",cursor:"pointer"}}>
+                  {editRuleId?"✏️ UPDATE RULE":"➕ RULE ADD KARO"}
+                </button>
+                {editRuleId&&(<button className="hov" onClick={function(){setNewRule({name:"",icon:"📌",description:"",bullish:"",bearish:""});setEditRuleId(null);}} style={{padding:"9px 14px",background:"#1a0808",border:"1px solid #ff174430",borderRadius:7,color:"#ff7043",fontFamily:"inherit",fontSize:10,fontWeight:"bold",cursor:"pointer"}}>❌ CANCEL</button>)}
+              </div>
+            </div>
+
+            {customRules.length===0?(
+              <div style={{textAlign:"center",padding:"30px 0",color:"#1a4060",fontSize:11}}>Koi custom rule nahi hai abhi.<br/>Upar form se apna pehla rule add karo!</div>
+            ):(
+              <div>
+                <div style={{fontSize:8,color:"#4a9eff",letterSpacing:3,marginBottom:8}}>{"SAVED RULES ("+customRules.length+") — YE SAARE ANALYSIS MEIN APPLY HONGE"}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {customRules.map(function(rule){
+                    return(
+                      <div key={rule.id} style={{background:"#060e1a",border:"1px solid #e040fb25",borderRadius:9,padding:13}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:20}}>{rule.icon||"📌"}</span>
+                            <div>
+                              <div style={{fontSize:12,fontWeight:900,color:"#e040fb"}}>{rule.name}</div>
+                              <div style={{fontSize:9,color:"#1a4060",marginTop:1}}>Custom Rule · IndexedDB</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:6}}>
+                            <button className="hov" onClick={function(){setNewRule({name:rule.name,icon:rule.icon||"📌",description:rule.description,bullish:rule.bullish,bearish:rule.bearish});setEditRuleId(rule.id);window.scrollTo(0,0);}} style={{padding:"5px 10px",background:"#1a1000",border:"1px solid #ffd74030",borderRadius:6,color:"#ffd740",fontFamily:"inherit",fontSize:9,cursor:"pointer"}}>✏️ EDIT</button>
+                            <button className="hov" onClick={async function(){if(window.confirm(rule.name+" delete karna chahte ho?")){await dbDelete("customRules",rule.id);var cr=await dbGetAll("customRules");setCustomRules(cr||[]);}}} style={{padding:"5px 10px",background:"#1a0808",border:"1px solid #ff174030",borderRadius:6,color:"#ff7043",fontFamily:"inherit",fontSize:9,cursor:"pointer"}}>🗑️ DELETE</button>
+                          </div>
+                        </div>
+                        <div style={{fontSize:9,color:"#5a7a8a",lineHeight:1.6,marginBottom:6}}>{rule.description}</div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                          <div style={{padding:"6px 9px",background:"#00e67608",borderRadius:6,border:"1px solid #00e67618"}}><div style={{fontSize:7,color:"#00e67688",marginBottom:2}}>🟢 BULLISH</div><div style={{fontSize:9,color:"#3a7a4a",lineHeight:1.4}}>{rule.bullish||"—"}</div></div>
+                          <div style={{padding:"6px 9px",background:"#ff174408",borderRadius:6,border:"1px solid #ff174418"}}><div style={{fontSize:7,color:"#ff174488",marginBottom:2}}>🔴 BEARISH</div><div style={{fontSize:9,color:"#7a3a3a",lineHeight:1.4}}>{rule.bearish||"—"}</div></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{marginTop:10,padding:"8px 11px",background:"#4a9eff08",borderRadius:7,border:"1px solid #4a9eff20",fontSize:9,color:"#2a5a7a",lineHeight:1.6}}>
+                  💡 Ye sab {customRules.length} custom rule(s) automatically har analysis mein apply honge.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{marginTop:16,padding:"8px 11px",background:"#ff980008",border:"1px solid #ff980018",borderRadius:6,fontSize:8,color:"#5a3814",textAlign:"center",letterSpacing:1}}>
+          ⚠️ TWELVE DATA FREE: 800 CALLS/DAY · 20 NK AMRITWANI + 8 VOLUME + CUSTOM RULES · EDUCATIONAL ONLY · NOT FINANCIAL ADVICE
+        </div>
+      </div>
+    </div>
+  );
+}
