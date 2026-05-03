@@ -692,6 +692,8 @@ export default function App() {
     }
     setAoLogging(false);
   }
+
+  async function saveTdKey() {
     if (!tdKey.trim()) return;
     await dbPut("settings",{key:"tdKey",value:tdKey.trim()});
     setTdSaved(true); setEditTd(false); setError("");
