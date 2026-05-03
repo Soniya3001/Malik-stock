@@ -634,6 +634,7 @@ export default function App() {
   var [customRules,setCustomRules]=useState([]);
   var [newRule,   setNewRule]   = useState({name:"",icon:"📌",description:"",bullish:"",bearish:""});
   var [editRuleId,setEditRuleId]=useState(null);
+  var [mkt,       setMkt]       = useState(getMarketStatus());
   var autoRefRef = useRef(autoRef);
   autoRefRef.current = autoRef;
 
