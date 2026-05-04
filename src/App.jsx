@@ -449,8 +449,8 @@ async function runAnalysis(stock, alreadyIn, entryPrice, aiProvider, aiKey, cust
 var AI_PROVIDERS = [
   {
     id: "gemini",
-    name: "gemini-2.5-flash-lite",
-    label: "Google Gemini Flash 2.5 lite",
+    name: "gemini-2.0-flash",
+    label: "Google Gemini Flash 2.0",
     icon: "🟢",
     free: "1500 calls/day",
     keyLink: "aistudio.google.com",
@@ -484,7 +484,7 @@ async function callAI(provider, apiKey, prompt) {
 
   if (provider === "gemini") {
     res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite-preview-05-20:generateContent?key=" + apiKey,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-05-20:generateContent?key=" + apiKey,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
